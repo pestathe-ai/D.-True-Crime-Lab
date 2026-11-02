@@ -59,7 +59,7 @@ jobs:
         run: |
           set -o pipefail
           if ! flutter build apk --release --split-per-abi 2>&1 | tee x.log; then
-            grep -n -i -E 'error|what went wrong|failed|exception|\.dart:[0-9]+' x.log | tail -40 \
+            { grep -n -i -A 8 'what went wrong' x.log; grep -n -i -E 'error:|\.dart:[0-9]+|\.kt:' x.log; } | head -50 \
               | sed 's/%/%25/g' | awk 'BEGIN{ORS="%0A"} {print}' > err.txt
             echo "::error title=build::$(cat err.txt)"
             exit 1
