@@ -1,7 +1,7 @@
 name: d_true_crime_lab
 description: "D. True Crime Lab – misteri che vivono dentro il tuo telefono."
 publish_to: 'none'
-version: 0.1.0+1
+version: 0.2.0+2
 
 environment:
   sdk: ^3.10.0
@@ -22,6 +22,8 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/photos/
   fonts:
     - family: Sora
       fonts:

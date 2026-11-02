@@ -151,4 +151,129 @@ void main() {
     expect(plan.every((p) => p.at.isAfter(start)), isTrue);
     expect(plan.length, lessThan(60));
   });
+
+  group('v0.2', () {
+    test('in due: telefono e tablet ricevono indizi diversi', () {
+      final tel = engine.visible(clock, StoryAnswers(), end,
+          device: Device.telefono);
+      final tab = engine.visible(clock, StoryAnswers(), end,
+          device: Device.tablet);
+      expect(tel.any((d) => d.id == '4e'), isTrue);
+      expect(tab.any((d) => d.id == '4e'), isFalse);
+      expect(tab.any((d) => d.id == '4d'), isTrue);
+      expect(tel.any((d) => d.id == '4d'), isFalse);
+      // Le scelte arrivano su entrambi (tranne il messaggio di Paolo).
+      expect(tab.any((d) => d.id == '5d'), isTrue);
+      expect(tel.any((d) => d.id == '5d'), isTrue);
+    });
+
+    test('codice per giocare in due: andata e ritorno', () {
+      final s = DateTime(2026, 11, 2, 16, 21);
+      final code = CaseCode.encode(s, preview: true);
+      expect(code.startsWith('TCL-'), isTrue);
+      final back = CaseCode.decode(code.toLowerCase());
+      expect(back, isNotNull);
+      expect(back!.start, s);
+      expect(back.preview, isTrue);
+      // Un errore di battitura viene scoperto.
+      final wrong = code.substring(0, code.length - 2) +
+          (code[code.length - 2] == 'A' ? 'B' : 'A') +
+          code[code.length - 1];
+      expect(CaseCode.decode(wrong), isNull);
+      expect(CaseCode.decode('ciao'), isNull);
+    });
+
+    test('domande: si sbloccano con gli indizi in bacheca', () {
+      final q1 = caseQuestions.firstWhere((q) => q.id == 'q1');
+      final later = DateTime(2026, 11, 4, 12);
+      expect(engine.questionUnlocked(q1, clock, later, {}), isFalse);
+      expect(engine.questionUnlocked(q1, clock, later, {'2a', '2c'}), isTrue);
+      // Sul tablet l'email 2a non c'è: basta 2c.
+      expect(
+        engine.questionUnlocked(q1, clock, later, {'2c'},
+            device: Device.tablet),
+        isTrue,
+      );
+      // Troppo presto: non si sblocca.
+      expect(
+        engine.questionUnlocked(q1, clock, start, {'2a', '2c'}),
+        isFalse,
+      );
+    });
+
+    test('ogni domanda richiede indizi che esistono', () {
+      final ids = casaStory.map((d) => d.id).toSet();
+      for (final q in caseQuestions) {
+        expect(q.requires.every(ids.contains), isTrue, reason: q.id);
+        expect(q.correct, lessThan(q.options.length));
+        for (final id in q.requires) {
+          expect(engine.byId(id).clue, isNotNull, reason: '$id in ${q.id}');
+        }
+      }
+    });
+
+    test('risposte giuste e sbagliate, punteggio', () {
+      final q = caseQuestions.first;
+      var a = StoryAnswers();
+      var r = engine.answerQuestion(q, (q.correct + 1) % q.options.length, a);
+      expect(r.correct, isFalse);
+      r = engine.answerQuestion(q, q.correct, r.answers);
+      expect(r.correct, isTrue);
+      final sc = engine.score(r.answers);
+      expect(sc.solved, 1);
+      expect(sc.errors, 1);
+      expect(sc.total, caseQuestions.length);
+    });
+
+    test('cartella privata: solo dal giorno 4 alle 20, codice giusto', () {
+      final d4 = DateTime(2026, 11, 5, 20, 30);
+      expect(engine.folderAvailable(clock, d4, Device.tablet), isTrue);
+      expect(engine.folderAvailable(clock, d4, Device.telefono), isFalse);
+      expect(
+        engine.folderAvailable(clock, DateTime(2026, 11, 5, 19), null),
+        isFalse,
+      );
+      expect(engine.tryFolder('1989', StoryAnswers()), isNull);
+      final a = engine.tryFolder(folderCode, StoryAnswers())!;
+      final v = engine.visible(clock, a, d4, device: Device.tablet);
+      expect(v.any((d) => d.id == 'priv1'), isTrue);
+    });
+
+    test('telefonate: Ettore risponde solo dopo aver capito chi è', () {
+      final d3 = DateTime(2026, 11, 4, 15);
+      final no = engine.call('c_ettore', clock, StoryAnswers(), d3);
+      expect(no.reply.answered, isFalse);
+      final yes = engine.call('c_ettore', clock, StoryAnswers({'q2': 'ok'}), d3);
+      expect(yes.reply.answered, isTrue);
+      expect(yes.answers.ok('call_ettore'), isTrue);
+      final v = engine.visible(clock, yes.answers, d3);
+      expect(v.any((d) => d.id == 'ce1'), isTrue);
+    });
+
+    test('telefonate: l\'Archivio risponde solo dalle 9 alle 13', () {
+      final open = engine.call(
+          'c_archivio', clock, StoryAnswers(), DateTime(2026, 11, 3, 10));
+      expect(open.reply.answered, isTrue);
+      expect(open.answers.ok('call_archivio'), isTrue);
+      final closed = engine.call(
+          'c_archivio', clock, StoryAnswers(), DateTime(2026, 11, 3, 15));
+      expect(closed.reply.answered, isFalse);
+    });
+
+    test('ora della storia', () {
+      final t = clock.storyNow(DateTime(2026, 11, 4, 10, 30));
+      expect(t.day, 3);
+      expect(t.hour, 10);
+      final p = StoryClock(start: start, preview: true);
+      final tp = p.storyNow(start.add(const Duration(minutes: 3, seconds: 30)));
+      expect(tp.day, 2);
+      expect(tp.hour, 4); // 30 s = 240 minuti della storia
+    });
+
+    test('le nuove scelte hanno una chiave propria', () {
+      expect(StoryEngine.choiceKey(engine.byId('3d')), choiceD3);
+      expect(StoryEngine.choiceKey(engine.byId('5d')), choiceD5);
+      expect(StoryEngine.choiceKey(engine.byId('4f')), '4f');
+    });
+  });
 }

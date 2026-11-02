@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/game.dart';
+import '../story/engine.dart';
 import 'theme.dart';
 
 /// Schermata iniziale: la libreria con la prima storia.
@@ -17,6 +19,116 @@ class _OnboardingState extends State<Onboarding> {
   bool _preview = false;
   bool _quiet = true;
   bool _busy = false;
+
+  Future<void> _createCoop() async {
+    final at = Game.coopStartNow();
+    final code = CaseCode.encode(at, preview: _preview);
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (d) => AlertDialog(
+        backgroundColor: Pal.surface2,
+        title: const Text('Partita a due'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Tu avrai il TELEFONO di Marta. Manda questo codice al tuo '
+              'amico: lui avrà il TABLET.',
+              style: TextStyle(height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            SelectableText(code, style: sora(24, weight: 800)),
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: code));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Codice copiato')),
+                );
+              },
+              icon: const Icon(Icons.copy, size: 16),
+              label: const Text('Copia codice'),
+            ),
+            const Text(
+              'Lo trovi sempre anche nelle impostazioni.',
+              style: TextStyle(color: Pal.muted, fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(d, false),
+            child: const Text('Annulla'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('Inizia'),
+          ),
+        ],
+      ),
+    );
+    if (go != true) return;
+    setState(() => _busy = true);
+    await widget.game.start(
+      preview: _preview,
+      quietNights: _quiet,
+      coopStart: at,
+    );
+  }
+
+  Future<void> _joinCoop() async {
+    final ctrl = TextEditingController();
+    String? error;
+    await showDialog<void>(
+      context: context,
+      builder: (d) => StatefulBuilder(
+        builder: (d, setLocal) => AlertDialog(
+          backgroundColor: Pal.surface2,
+          title: const Text('Entra con un codice'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Inserisci il codice che ti ha mandato il tuo amico. '
+                'Tu avrai il TABLET di Marta.',
+                style: TextStyle(height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.characters,
+                decoration: InputDecoration(
+                  hintText: 'TCL-…',
+                  errorText: error,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(d),
+              child: const Text('Annulla'),
+            ),
+            TextButton(
+              onPressed: () async {
+                final ok = await widget.game.join(
+                  ctrl.text,
+                  quietNights: _quiet,
+                );
+                if (ok) {
+                  if (d.mounted) Navigator.pop(d);
+                } else {
+                  setLocal(() => error = 'Codice non valido');
+                }
+              },
+              child: const Text('Entra'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +179,8 @@ class _OnboardingState extends State<Onboarding> {
                     children: [
                       _Chip('7 giorni'),
                       _Chip('4 finali'),
-                      _Chip('Le tue scelte contano'),
+                      _Chip('6 domande del caso'),
+                      _Chip('Da soli o in due'),
                     ],
                   ),
                 ],
@@ -88,30 +201,38 @@ class _OnboardingState extends State<Onboarding> {
               onChanged: (v) => setState(() => _quiet = v),
             ),
             const SizedBox(height: 18),
-            SizedBox(
-              height: 54,
-              child: FilledButton(
-                onPressed: _busy
-                    ? null
-                    : () async {
-                        setState(() => _busy = true);
-                        await widget.game.start(
-                          preview: _preview,
-                          quietNights: _quiet,
-                        );
-                      },
-                style: FilledButton.styleFrom(
-                  backgroundColor: Pal.accent,
-                  foregroundColor: Pal.inkDark,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                ),
-                child: Text(
-                  'Accendi il telefono',
-                  style: sora(16, weight: 700, color: Pal.inkDark),
-                ),
-              ),
+            _BigButton(
+              label: 'Gioca da solo',
+              icon: Icons.person,
+              filled: true,
+              onPressed: _busy
+                  ? null
+                  : () async {
+                      setState(() => _busy = true);
+                      await widget.game.start(
+                        preview: _preview,
+                        quietNights: _quiet,
+                      );
+                    },
+            ),
+            const SizedBox(height: 10),
+            _BigButton(
+              label: 'Gioca in due · crea la partita',
+              icon: Icons.group_add,
+              onPressed: _busy ? null : _createCoop,
+            ),
+            const SizedBox(height: 10),
+            _BigButton(
+              label: 'Gioca in due · entra con un codice',
+              icon: Icons.vpn_key,
+              onPressed: _busy ? null : _joinCoop,
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'In due: uno ha il telefono di Marta, l\'altro il suo tablet. '
+              'Ognuno riceve indizi diversi: per risolvere il caso dovete '
+              'parlarvi.',
+              style: TextStyle(color: Pal.muted, fontSize: 13, height: 1.4),
             ),
             const SizedBox(height: 12),
             const Text(
@@ -216,4 +337,51 @@ class _TapePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _BigButton extends StatelessWidget {
+  const _BigButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.filled = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(14));
+    if (filled) {
+      return SizedBox(
+        height: 54,
+        child: FilledButton.icon(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: Pal.accent,
+            foregroundColor: Pal.inkDark,
+            shape: shape,
+          ),
+          icon: Icon(icon),
+          label: Text(label, style: sora(16, weight: 700, color: Pal.inkDark)),
+        ),
+      );
+    }
+    return SizedBox(
+      height: 50,
+      child: OutlinedButton.icon(
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: Pal.accent,
+          side: const BorderSide(color: Pal.accent),
+          shape: shape,
+        ),
+        icon: Icon(icon, size: 20),
+        label: Text(label),
+      ),
+    );
+  }
 }

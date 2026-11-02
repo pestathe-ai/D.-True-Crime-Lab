@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../services/game.dart';
 import '../story/model.dart';
+import 'photo.dart';
 import 'theme.dart';
 
 IconData iconFor(DropKind k) {
@@ -102,11 +103,57 @@ class _Header extends StatelessWidget {
   }
 }
 
+/// Pulsante per appuntare un indizio in bacheca.
+class PinButton extends StatelessWidget {
+  const PinButton({super.key, required this.drop, required this.game});
+
+  final Drop drop;
+  final Game game;
+
+  @override
+  Widget build(BuildContext context) {
+    if (drop.clue == null) return const SizedBox.shrink();
+    final pinned = game.isPinned(drop);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: TextButton.icon(
+          onPressed: () {
+            game.togglePin(drop);
+            if (!pinned) {
+              ScaffoldMessenger.of(context)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  const SnackBar(
+                    content: Text('📌 Indizio appuntato nella bacheca'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+            }
+          },
+          style: TextButton.styleFrom(
+            foregroundColor: pinned ? Pal.inkDark : Pal.accent,
+            backgroundColor: pinned ? Pal.accent : Colors.transparent,
+            side: const BorderSide(color: Pal.accent),
+            visualDensity: VisualDensity.compact,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+          ),
+          icon: Icon(
+            pinned ? Icons.push_pin : Icons.push_pin_outlined,
+            size: 16,
+          ),
+          label: Text(pinned ? 'In bacheca' : 'Appunta in bacheca'),
+        ),
+      ),
+    );
+  }
+}
+
 class _Shell extends StatelessWidget {
-  const _Shell({required this.child, this.color = Pal.surface});
+  const _Shell({required this.child});
 
   final Widget child;
-  final Color color;
 
   @override
   Widget build(BuildContext context) {
@@ -114,7 +161,7 @@ class _Shell extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: color,
+        color: Pal.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Pal.line),
       ),
@@ -139,25 +186,50 @@ class DropCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isNew = highlight || game.isNew(drop);
+    final header = _Header(drop: drop, isNew: isNew);
+    final pin = PinButton(drop: drop, game: game);
     switch (drop.kind) {
       case DropKind.sistema:
-        return _SystemCard(drop: drop);
+        return _SystemCard(drop: drop, game: game);
       case DropKind.vocale:
-        return _VoiceCard(drop: drop, game: game, isNew: isNew);
+        return _VoiceCard(drop: drop, game: game, header: header, pin: pin);
       case DropKind.foto:
-        return _PhotoCard(drop: drop, isNew: isNew);
+        return _Shell(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              header,
+              const SizedBox(height: 10),
+              GestureDetector(
+                onTap: () => openPhoto(context, drop, game),
+                child: PhotoFrame(drop: drop),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                drop.body,
+                style: const TextStyle(
+                  fontStyle: FontStyle.italic,
+                  color: Pal.text,
+                  height: 1.45,
+                ),
+              ),
+              pin,
+            ],
+          ),
+        );
       case DropKind.email:
-        return _EmailCard(drop: drop, isNew: isNew);
+        return _EmailCard(drop: drop, header: header, pin: pin);
       case DropKind.scelta:
-        return _ChoiceCard(drop: drop, game: game, isNew: isNew);
+        return _ChoiceCard(drop: drop, game: game, header: header);
       case DropKind.messaggio:
         return _Shell(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(drop: drop, isNew: isNew),
+              header,
               const SizedBox(height: 10),
               _Bubble(text: drop.body, mine: false),
+              pin,
             ],
           ),
         );
@@ -166,7 +238,7 @@ class DropCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(drop: drop, isNew: isNew),
+              header,
               const SizedBox(height: 8),
               Text(
                 drop.at.day == 0
@@ -184,7 +256,7 @@ class DropCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Header(drop: drop, isNew: isNew),
+              header,
               const SizedBox(height: 10),
               Text(
                 drop.body,
@@ -194,6 +266,7 @@ class DropCard extends StatelessWidget {
                   color: Pal.text,
                 ),
               ),
+              pin,
             ],
           ),
         );
@@ -202,13 +275,15 @@ class DropCard extends StatelessWidget {
 }
 
 class _SystemCard extends StatelessWidget {
-  const _SystemCard({required this.drop});
+  const _SystemCard({required this.drop, required this.game});
 
   final Drop drop;
+  final Game game;
 
   @override
   Widget build(BuildContext context) {
     if (drop.ending != null) {
+      final s = game.score;
       return Container(
         margin: const EdgeInsets.fromLTRB(16, 14, 16, 6),
         padding: const EdgeInsets.all(18),
@@ -227,6 +302,12 @@ class _SystemCard extends StatelessWidget {
             Text(
               drop.body,
               style: const TextStyle(color: Pal.inkDark, fontSize: 14),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Indagine: ${s.solved} domande su ${s.total} risolte'
+              '${s.errors > 0 ? ' · ${s.errors} errori' : ''}',
+              style: sora(13, weight: 700, color: Pal.inkDark),
             ),
           ],
         ),
@@ -252,12 +333,14 @@ class _VoiceCard extends StatefulWidget {
   const _VoiceCard({
     required this.drop,
     required this.game,
-    required this.isNew,
+    required this.header,
+    required this.pin,
   });
 
   final Drop drop;
   final Game game;
-  final bool isNew;
+  final Widget header;
+  final Widget pin;
 
   @override
   State<_VoiceCard> createState() => _VoiceCardState();
@@ -273,7 +356,7 @@ class _VoiceCardState extends State<_VoiceCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Header(drop: d, isNew: widget.isNew),
+          widget.header,
           const SizedBox(height: 10),
           ValueListenableBuilder<String?>(
             valueListenable: widget.game.voice.playing,
@@ -318,6 +401,7 @@ class _VoiceCardState extends State<_VoiceCard> {
                 height: 1.45,
               ),
             ),
+          widget.pin,
         ],
       ),
     );
@@ -358,14 +442,53 @@ class _Wave extends StatelessWidget {
   }
 }
 
+/// Anteprima di una foto: l'illustrazione se c'è, altrimenti un riquadro.
 class PhotoFrame extends StatelessWidget {
-  const PhotoFrame({super.key, required this.drop, this.height = 150});
+  const PhotoFrame({super.key, required this.drop, this.height = 170});
 
   final Drop drop;
   final double height;
 
   @override
   Widget build(BuildContext context) {
+    final image = drop.image;
+    if (image != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          children: [
+            Image.asset(
+              image,
+              height: height,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+            Positioned(
+              right: 8,
+              bottom: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.zoom_in, size: 14, color: Colors.white),
+                    SizedBox(width: 4),
+                    Text(
+                      'Ingrandisci',
+                      style: TextStyle(fontSize: 11, color: Colors.white),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final h = drop.id.hashCode;
     final c1 = HSLColor.fromAHSL(1, (h % 360).toDouble(), 0.18, 0.22).toColor();
     final c2 =
@@ -381,71 +504,23 @@ class PhotoFrame extends StatelessWidget {
           colors: [c1, c2],
         ),
       ),
-      child: Stack(
-        children: [
-          Positioned(
-            right: 10,
-            top: 8,
-            child: Text(
-              drop.title ?? '',
-              style: const TextStyle(fontSize: 11, color: Colors.white70),
-            ),
-          ),
-          const Center(
-            child: Icon(Icons.blur_on, size: 46, color: Colors.white24),
-          ),
-          Positioned(
-            left: 10,
-            bottom: 8,
-            child: Text(
-              'Foto sfocata',
-              style: TextStyle(
-                fontSize: 10,
-                color: Colors.white.withValues(alpha: 0.55),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PhotoCard extends StatelessWidget {
-  const _PhotoCard({required this.drop, required this.isNew});
-
-  final Drop drop;
-  final bool isNew;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Shell(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _Header(drop: drop, isNew: isNew),
-          const SizedBox(height: 10),
-          PhotoFrame(drop: drop),
-          const SizedBox(height: 10),
-          Text(
-            drop.body,
-            style: const TextStyle(
-              fontStyle: FontStyle.italic,
-              color: Pal.text,
-              height: 1.45,
-            ),
-          ),
-        ],
+      child: const Center(
+        child: Icon(Icons.blur_on, size: 46, color: Colors.white24),
       ),
     );
   }
 }
 
 class _EmailCard extends StatefulWidget {
-  const _EmailCard({required this.drop, required this.isNew});
+  const _EmailCard({
+    required this.drop,
+    required this.header,
+    required this.pin,
+  });
 
   final Drop drop;
-  final bool isNew;
+  final Widget header;
+  final Widget pin;
 
   @override
   State<_EmailCard> createState() => _EmailCardState();
@@ -463,7 +538,7 @@ class _EmailCardState extends State<_EmailCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _Header(drop: d, isNew: widget.isNew),
+            widget.header,
             const SizedBox(height: 8),
             Text(
               d.title ?? '(senza oggetto)',
@@ -484,6 +559,7 @@ class _EmailCardState extends State<_EmailCard> {
                   style: TextStyle(fontSize: 12, color: Pal.accent),
                 ),
               ),
+            widget.pin,
           ],
         ),
       ),
@@ -534,12 +610,12 @@ class _ChoiceCard extends StatelessWidget {
   const _ChoiceCard({
     required this.drop,
     required this.game,
-    required this.isNew,
+    required this.header,
   });
 
   final Drop drop;
   final Game game;
-  final bool isNew;
+  final Widget header;
 
   @override
   Widget build(BuildContext context) {
@@ -553,7 +629,7 @@ class _ChoiceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _Header(drop: drop, isNew: isNew),
+          header,
           const SizedBox(height: 10),
           _Bubble(text: drop.body, mine: false),
           const SizedBox(height: 10),
@@ -561,9 +637,11 @@ class _ChoiceCard extends StatelessWidget {
             _Bubble(text: chosen.label, mine: true),
             if (chosen.reply != null) _Bubble(text: chosen.reply!, mine: false),
           ] else if (open) ...[
-            const Text(
-              'Rispondi:',
-              style: TextStyle(fontSize: 12, color: Pal.muted),
+            Text(
+              game.coop
+                  ? 'Rispondi (decidetelo insieme!):'
+                  : 'Rispondi:',
+              style: const TextStyle(fontSize: 12, color: Pal.muted),
             ),
             const SizedBox(height: 6),
             for (final o in drop.options)

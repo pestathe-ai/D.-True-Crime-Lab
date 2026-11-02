@@ -11,6 +11,7 @@ class Voice {
     'marta': (pitch: 1.1, rate: 0.40, vol: 0.55),
     'ettore': (pitch: 0.72, rate: 0.38, vol: 1.0),
     'elsa': (pitch: 0.92, rate: 0.36, vol: 0.9),
+    'paolo': (pitch: 0.85, rate: 0.46, vol: 1.0),
   };
 
   Future<void> _init() async {

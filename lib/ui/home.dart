@@ -1,13 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/game.dart';
 import '../story/model.dart';
 import 'cards.dart';
+import 'case_board.dart';
+import 'gallery.dart';
 import 'theme.dart';
 
-/// Il telefono di Marta: cronologia, messaggi, posta, galleria, rubrica.
+/// Il dispositivo di Marta: cronologia, messaggi, galleria, indagine, rubrica.
 class Home extends StatefulWidget {
   const Home({super.key, required this.game});
 
@@ -25,6 +28,9 @@ class _Tab {
   final bool Function(Drop d) filter;
 }
 
+bool _isPrivateNote(Drop d) =>
+    d.kind == DropKind.nota && d.title == 'Cartella privata';
+
 final _tabs = <_Tab>[
   _Tab('Cronologia', Icons.history, (d) => true),
   _Tab(
@@ -33,10 +39,15 @@ final _tabs = <_Tab>[
     (d) =>
         d.kind == DropKind.messaggio ||
         d.kind == DropKind.scelta ||
-        d.kind == DropKind.vocale,
+        d.kind == DropKind.vocale ||
+        d.kind == DropKind.email,
   ),
-  _Tab('Posta', Icons.mail_outline, (d) => d.kind == DropKind.email),
-  _Tab('Galleria', Icons.photo_library_outlined, (d) => d.kind == DropKind.foto),
+  _Tab(
+    'Galleria',
+    Icons.photo_library_outlined,
+    (d) => d.kind == DropKind.foto || _isPrivateNote(d),
+  ),
+  _Tab('Indagine', Icons.fingerprint, (d) => false),
   _Tab('Rubrica', Icons.contacts_outlined, (d) => d.kind == DropKind.contatto),
 ];
 
@@ -91,8 +102,36 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
             : game.day == 0
                 ? 'In attesa'
                 : 'Giorno ${game.day} di 7';
-    // Segna come visti i contenuti della scheda aperta (dopo il disegno).
     WidgetsBinding.instance.addPostFrameCallback((_) => _markCurrent());
+
+    final Widget body;
+    switch (_index) {
+      case 2:
+        body = Gallery(
+          game: game,
+          items: visible.where(_tabs[2].filter).toList(),
+        );
+      case 3:
+        body = CaseBoard(game: game);
+      case 4:
+        body = _Contacts(
+          game: game,
+          items: visible.where(_tabs[4].filter).toList(),
+        );
+      default:
+        body = _Feed(
+          game: game,
+          items: visible.where(_tabs[_index].filter).toList(),
+          empty: _index == 1
+              ? 'Ancora nessun messaggio.\nNessuno sa che hai questo '
+                  'dispositivo. Per ora.'
+              : 'Niente di nuovo.',
+          showSignature: _index == 0,
+          fresh: _fresh,
+        );
+    }
+
+    final openQ = game.openQuestions.where((q) => !game.solved(q)).length;
 
     return Scaffold(
       appBar: AppBar(
@@ -100,9 +139,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Telefono di Marta V.', style: sora(17, weight: 700)),
+            Text(game.deviceName, style: sora(17, weight: 700)),
             Text(
-              '◆ $status',
+              game.coop ? '◆ $status · in due' : '◆ $status',
               style: const TextStyle(fontSize: 12, color: Pal.accent),
             ),
           ],
@@ -115,15 +154,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: _index == 4
-          ? _Contacts(game: game, items: visible.where(_tabs[4].filter).toList())
-          : _Feed(
-              game: game,
-              items: visible.where(_tabs[_index].filter).toList(),
-              empty: _emptyText(_index),
-              fresh: _fresh,
-              showSignature: _index == 0,
-            ),
+      body: body,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) {
@@ -134,13 +165,15 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
           WidgetsBinding.instance.addPostFrameCallback((_) => _markCurrent());
         },
         destinations: [
-          for (final t in _tabs)
+          for (var i = 0; i < _tabs.length; i++)
             NavigationDestination(
               icon: _badge(
-                visible.where(t.filter).where(game.isNew).length,
-                Icon(t.icon),
+                i == 3
+                    ? openQ
+                    : visible.where(_tabs[i].filter).where(game.isNew).length,
+                Icon(_tabs[i].icon),
               ),
-              label: t.label,
+              label: _tabs[i].label,
             ),
         ],
       ),
@@ -157,31 +190,19 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     );
   }
 
-  String _emptyText(int i) {
-    switch (i) {
-      case 1:
-        return 'Ancora nessun messaggio.\nNessuno sa che hai questo telefono. Per ora.';
-      case 2:
-        return 'La posta è vuota.';
-      case 3:
-        return 'Nessuna foto.';
-      default:
-        return 'Niente di nuovo.';
-    }
-  }
-
   void _settings(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Pal.surface,
       showDragHandle: true,
+      isScrollControlled: true,
       builder: (ctx) => ListenableBuilder(
         listenable: game,
         builder: (ctx, _) {
           final s = game.state;
           if (s == null) return const SizedBox.shrink();
           return SafeArea(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -195,6 +216,52 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                         : 'Modalità: tempo reale',
                     style: const TextStyle(color: Pal.muted),
                   ),
+                  if (game.coop && s.caseCode != null) ...[
+                    const SizedBox(height: 14),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Pal.surface2,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Pal.accent),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            game.onTablet
+                                ? 'Partita a due · tu hai il TABLET'
+                                : 'Partita a due · tu hai il TELEFONO',
+                            style: sora(13, weight: 700, color: Pal.accent),
+                          ),
+                          const SizedBox(height: 6),
+                          SelectableText(
+                            s.caseCode!,
+                            style: sora(22, weight: 800),
+                          ),
+                          const SizedBox(height: 4),
+                          const Text(
+                            'Il tuo amico lo inserisce in «Gioca in due → '
+                            'Entra con un codice».',
+                            style: TextStyle(color: Pal.muted, fontSize: 13),
+                          ),
+                          TextButton.icon(
+                            onPressed: () {
+                              Clipboard.setData(
+                                ClipboardData(text: s.caseCode!),
+                              );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Codice copiato')),
+                              );
+                            },
+                            icon: const Icon(Icons.copy, size: 16),
+                            label: const Text('Copia codice'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   SwitchListTile(
                     contentPadding: EdgeInsets.zero,
                     title: const Text('Notti tranquille'),
@@ -205,21 +272,22 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                     value: s.quietNights,
                     onChanged: game.setQuietNights,
                   ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      game.paused ? Icons.play_arrow : Icons.pause,
-                      color: Pal.accent,
+                  if (!game.coop)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        game.paused ? Icons.play_arrow : Icons.pause,
+                        color: Pal.accent,
+                      ),
+                      title: Text(
+                        game.paused ? 'Riprendi la storia' : 'Metti in pausa',
+                      ),
+                      subtitle: const Text(
+                        'In pausa il tempo della storia si ferma',
+                        style: TextStyle(color: Pal.muted),
+                      ),
+                      onTap: game.togglePause,
                     ),
-                    title: Text(
-                      game.paused ? 'Riprendi la storia' : 'Metti in pausa',
-                    ),
-                    subtitle: const Text(
-                      'In pausa il tempo della storia si ferma',
-                      style: TextStyle(color: Pal.muted),
-                    ),
-                    onTap: game.togglePause,
-                  ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.restart_alt, color: Pal.accent),
@@ -235,7 +303,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                           backgroundColor: Pal.surface2,
                           title: const Text('Ricominciare?'),
                           content: const Text(
-                            'Perderai le scelte fatte finora.',
+                            'Perderai le scelte e gli indizi raccolti.',
                           ),
                           actions: [
                             TextButton(
@@ -323,6 +391,15 @@ class _Contacts extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
+        if (game.onTablet)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              'Dal tablet non si può telefonare: chiedi al tuo compagno, '
+              'che ha il telefono.',
+              style: TextStyle(color: Pal.accent, fontSize: 13),
+            ),
+          ),
         for (final c in items)
           ListTile(
             leading: CircleAvatar(
@@ -332,25 +409,70 @@ class _Contacts extends StatelessWidget {
             ),
             title: Text(c.title ?? ''),
             subtitle: Text(c.body, style: const TextStyle(color: Pal.muted)),
-            trailing: IconButton(
-              icon: const Icon(Icons.call, color: Pal.accent),
-              onPressed: () => _call(context, c),
-            ),
+            trailing: game.onTablet
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.call, color: Pal.accent),
+                    onPressed: () => _call(context, c),
+                  ),
           ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Text(
+            'Le persone rispondono in modo diverso in base a cosa hai '
+            'scoperto, e all\'ora della storia.',
+            style: TextStyle(color: Pal.muted, fontSize: 12, height: 1.4),
+          ),
+        ),
         const DomSignature(),
       ],
     );
   }
 
+  Future<void> _showCall(
+    BuildContext context,
+    String who,
+    String text, {
+    required bool answered,
+    String? voice,
+  }) async {
+    if (answered && voice != null) {
+      game.voice.play('call', text.replaceAll('\n', ' '), voice);
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (d) => AlertDialog(
+        backgroundColor: Pal.surface2,
+        icon: Icon(
+          answered ? Icons.phone_in_talk : Icons.phone_missed,
+          color: Pal.accent,
+        ),
+        title: Text(who),
+        content: Text(text, style: const TextStyle(height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () {
+              game.voice.stop();
+              Navigator.pop(d);
+            },
+            child: const Text('Riaggancia'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _call(BuildContext context, Drop c) async {
     if (!c.callable) {
-      final msg = switch (c.id) {
-        'c_paolo' => 'Squilla a vuoto. Poi la segreteria: «Paolo Venier, '
-            'Ufficio Tecnico. Lasciate un messaggio.»',
-        'c_ettore' => 'Squilla a lungo. Nessuno risponde.',
-        _ => 'L\'ufficio è chiuso.',
-      };
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      final r = await game.call(c.id);
+      if (!context.mounted) return;
+      await _showCall(
+        context,
+        c.title ?? '',
+        r.text,
+        answered: r.answered,
+        voice: r.voice,
+      );
       return;
     }
     final storyOver = game.ending != null;
@@ -360,9 +482,7 @@ class _Contacts extends StatelessWidget {
         builder: (d) => AlertDialog(
           backgroundColor: Pal.surface2,
           title: const Text('Chiamare Casa?'),
-          content: const Text(
-            'Qualcuno ti ha chiesto di non farlo.',
-          ),
+          content: const Text('Qualcuno ti ha chiesto di non farlo.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(d, false),
@@ -378,27 +498,13 @@ class _Contacts extends StatelessWidget {
       if (ok != true) return;
     }
     final r = await game.callCasa();
-    if (r.speaks) {
-      game.voice.play('call', r.text.replaceAll('\n', ' '), 'elsa');
-    }
     if (!context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (d) => AlertDialog(
-        backgroundColor: Pal.surface2,
-        icon: const Icon(Icons.phone_in_talk, color: Pal.accent),
-        title: const Text('Casa'),
-        content: Text(r.text, style: const TextStyle(height: 1.5)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              game.voice.stop();
-              Navigator.pop(d);
-            },
-            child: const Text('Riaggancia'),
-          ),
-        ],
-      ),
+    await _showCall(
+      context,
+      'Casa',
+      r.text,
+      answered: r.speaks,
+      voice: r.speaks ? 'elsa' : null,
     );
   }
 }
